@@ -1,0 +1,9 @@
+model_list:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: gpt-4o-mini
+      timeout: 30
+
+litellm_settings:
+  num_retries: 3
+  timeout: 30
