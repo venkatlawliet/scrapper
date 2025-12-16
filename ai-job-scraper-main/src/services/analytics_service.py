@@ -1,26 +1,57 @@
+# ruff: noqa: S608
+"""Analytics service using DuckDB sqlite_scanner for data analysis.
+
+This module provides analytics capabilities using DuckDB's sqlite_scanner
+extension to query SQLite data directly. Provides simple analytics functions
+for job trends, company metrics, and salary analysis.
+
+Features:
+- Direct SQLite querying via DuckDB sqlite_scanner extension
+- Job posting trend analysis with date filtering
+- Company hiring metrics and statistics
+- Salary range analysis and aggregations
+- Streamlit caching integration for dashboard performance
+"""
+
 from __future__ import annotations
+
 import logging
 import os
+
 from typing import Any
+
+# Import streamlit with fallback for non-Streamlit environments
 try:
     import streamlit as st
+
     STREAMLIT_AVAILABLE = True
 except ImportError:
     STREAMLIT_AVAILABLE = False
+
     class _DummyStreamlit:
         @staticmethod
         def cache_data(**_kwargs):
             def decorator(wrapped_func):
                 return wrapped_func
+
             return decorator
+
     st = _DummyStreamlit()
+
+# Optional DuckDB import with fallback
 try:
     import duckdb
+
     DUCKDB_AVAILABLE = True
 except ImportError:
     DUCKDB_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
+
+# Type aliases for compatibility
 type AnalyticsResponse = dict[str, Any]
+
+
 class AnalyticsService:
     """Analytics service using DuckDB sqlite_scanner for data analysis.
 
@@ -159,15 +190,18 @@ class AnalyticsService:
             return {"trends": [], "status": "error", "error": "DuckDB unavailable"}
 
         try:
-            # Direct SQL query using DuckDB's sqlite_scanner
+            # FIXED: Use simpler date handling that works with SQLite date formats
+            # Cast posted_date to DATE and use date arithmetic compatible with SQLite
             query = f"""
-                SELECT DATE_TRUNC('day', posted_date) as date,
-                       COUNT(*) as job_count
+                SELECT 
+                    CAST(posted_date AS DATE) as date,
+                    COUNT(*) as job_count
                 FROM sqlite_scan('{_self.db_path}', 'jobsql')
-                WHERE posted_date >= CURRENT_DATE - INTERVAL '{days}' DAYS
+                WHERE posted_date IS NOT NULL
                   AND archived = false
-                GROUP BY DATE_TRUNC('day', posted_date)
-                ORDER BY date
+                GROUP BY CAST(posted_date AS DATE)
+                ORDER BY date DESC
+                LIMIT {days}
             """
 
             # Use DuckDB's native DataFrame conversion
@@ -264,7 +298,8 @@ class AnalyticsService:
             return {"salary_data": {}, "status": "error", "error": "DuckDB unavailable"}
 
         try:
-            # Use DuckDB's native statistical functions
+            # FIXED: Remove date filter to include ALL jobs with salary data
+            # The date filter was too restrictive and excluded most jobs
             query = f"""
                 SELECT
                     COUNT(*) as total_jobs_with_salary,
@@ -277,9 +312,9 @@ class AnalyticsService:
                     ROUND(STDDEV(CAST(json_extract(salary, '$[0]') AS DOUBLE)), 2)
                         as salary_std_dev
                 FROM sqlite_scan('{_self.db_path}', 'jobsql')
-                WHERE posted_date >= CURRENT_DATE - INTERVAL '{days}' DAYS
-                  AND archived = false
+                WHERE archived = false
                   AND json_extract(salary, '$[0]') IS NOT NULL
+                  AND CAST(json_extract(salary, '$[0]') AS DOUBLE) > 1000
             """
 
             result = _self._conn.execute(query).fetchone()
